@@ -1,6 +1,8 @@
 import requests
 from bs4 import BeautifulSoup
 import streamlit as st
+import pdfkit
+from io import BytesIO
 
 def fetch_seo_data(url):
     try:
@@ -34,8 +36,17 @@ def fetch_seo_data(url):
         external_links = [link for link in links if url not in link["href"]]
         link_score = 10 if internal_links else 0
         
+        # Fetch Page Speed Score from Google PageSpeed API
+        pagespeed_api = f"https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url={url}&key=YOUR_API_KEY"
+        speed_score = 0
+        try:
+            speed_response = requests.get(pagespeed_api).json()
+            speed_score = speed_response.get("lighthouseResult", {}).get("categories", {}).get("performance", {}).get("score", 0) * 100
+        except:
+            pass
+        
         # Calculate Total SEO Score
-        seo_score = title_score + desc_score + headings_score + image_alt_score + link_score
+        seo_score = title_score + desc_score + headings_score + image_alt_score + link_score + (speed_score / 10)
         
         priority_issues = []
         if not title:
@@ -58,10 +69,15 @@ def fetch_seo_data(url):
             "images_with_alt": len(images_with_alt),
             "total_images": len(images),
             "seo_score": seo_score,
+            "page_speed_score": speed_score,
             "priority_issues": priority_issues
         }
     except Exception as e:
         return {"error": str(e)}
+
+def generate_pdf(report_html):
+    pdf = pdfkit.from_string(report_html, False)
+    return BytesIO(pdf)
 
 # Streamlit UI
 st.title("Advanced SEO Audit Tool")
@@ -82,12 +98,28 @@ if st.button("Analyze"):
             st.write(f"**Internal Links:** {result['internal_links']}")
             st.write(f"**External Links:** {result['external_links']}")
             st.write(f"**Images with Alt Text:** {result['images_with_alt']} / {result['total_images']}")
+            st.write(f"**Page Speed Score:** {result['page_speed_score']}")
             
-            st.subheader(f"Overall SEO Score: {result['seo_score']} / 50")
+            st.subheader(f"Overall SEO Score: {result['seo_score']} / 60")
             
             if result['priority_issues']:
                 st.subheader("Priority Issues to Fix:")
                 for issue in result['priority_issues']:
                     st.write(f"- {issue}")
+            
+            report_html = f"""
+            <h1>SEO Audit Report</h1>
+            <p><strong>Title:</strong> {result['title']}</p>
+            <p><strong>Meta Description:</strong> {result['description']}</p>
+            <p><strong>Internal Links:</strong> {result['internal_links']}</p>
+            <p><strong>External Links:</strong> {result['external_links']}</p>
+            <p><strong>Page Speed Score:</strong> {result['page_speed_score']}</p>
+            <h2>Priority Issues:</h2>
+            <ul>
+            {''.join(f'<li>{issue}</li>' for issue in result['priority_issues'])}
+            </ul>
+            """
+            pdf = generate_pdf(report_html)
+            st.download_button("Download Report as PDF", pdf, "SEO_Audit_Report.pdf", "application/pdf")
     else:
         st.warning("Please enter a valid URL.")
